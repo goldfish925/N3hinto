@@ -479,7 +479,7 @@
             
             for (const [pattern, indices] of Object.entries(patterns)) {
                 const consecutiveCount = getConsecutiveCount(indices);
-                if (consecutiveCount >= 1) {
+                if (consecutiveCount >= 2) {
                     results.push({
                         pattern,
                         count: consecutiveCount,
