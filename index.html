@@ -269,6 +269,48 @@
             opacity: 0.8;
             line-height: 1.6;
         }
+        
+        .explosion-alert {
+            background: #A0826D;
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 25px;
+        }
+        
+        .explosion-item {
+            background: rgba(255,255,255,0.1);
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 12px;
+        }
+        
+        .explosion-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .explosion-numbers {
+            font-size: 20px;
+            font-weight: bold;
+        }
+        
+        .explosion-timing {
+            font-size: 13px;
+            opacity: 0.9;
+        }
+        
+        .explosion-detail {
+            font-size: 13px;
+            opacity: 0.8;
+            line-height: 1.5;
+        }
+        
+        .area-strong { color: #FFE4B5; }
+        .area-mid { color: #F0E68C; }
+        .area-weak { color: #DEB887; }
     </style>
 </head>
 <body>
@@ -276,20 +318,22 @@
         <h1>ナンバーズ3 波動分析システム</h1>
         
         <div class="input-section">
-            <label>過去12回分の強弱順位表を入力（点区切り）</label>
+            <label>過去データの強弱順位表を入力（点区切り）</label>
             <div class="example">
                 例：<br>
                 6.0.1.4.2.3.5.8.7.9<br>
                 0.1.4.6.2.3.5.8.7.9<br>
-                ...（12行）
+                ...（4回以上）
             </div>
-            <textarea id="dataInput" placeholder="ここに12回分のデータを貼り付けてください"></textarea>
+            <textarea id="dataInput" placeholder="ここにデータを貼り付けてください（4回以上）"></textarea>
         </div>
         
         <button onclick="analyze()">分析開始</button>
         
         <div id="results" class="results" style="display: none;">
             <div id="compressionAlert"></div>
+            
+            <div id="explosionAlert"></div>
             
             <div class="result-section">
                 <div class="result-title">2個組の連続パターン</div>
@@ -308,8 +352,8 @@
             const input = document.getElementById('dataInput').value.trim();
             const lines = input.split('\n').filter(line => line.trim());
             
-            if (lines.length !== 12) {
-                alert('12回分のデータを入力してください');
+            if (lines.length < 4) {
+                alert('最低4回分のデータを入力してください');
                 return;
             }
             
@@ -319,6 +363,9 @@
             
             // 圧縮点検知
             analyzeCompression(rankings);
+            
+            // 3個並び爆発検知
+            analyzeExplosionPattern(rankings);
             
             // 2個組の分析
             const pairPatterns = {};
@@ -389,6 +436,7 @@
                     round: i + 1,
                     score: midCount,
                     numbers: midNums,
+                    topNumbers: rank.slice(0, 3), // 強エリア（1-3位）
                     isEdge: rank[0] || rank[9] // 端の数字
                 });
             }
@@ -397,6 +445,9 @@
             const recent4 = compressionScores.slice(-4);
             const compressionCount = recent4.filter(s => s.score >= 4).length;
             const isAlert = compressionCount >= 3;
+            
+            // 強エリア連続チェック
+            const strongContinuous = checkStrongAreaContinuous(recent4);
             
             // ダブル候補の抽出
             const lastRound = compressionScores[compressionScores.length - 1];
@@ -411,21 +462,165 @@
                 const centerNums = lastRound.numbers.slice(1, 4);
                 candidates.main = centerNums.map(n => `${n}${n}`);
                 
+                // 強エリア連続の数字を最優先に追加
+                strongContinuous.forEach(n => {
+                    const double = `${n}${n}`;
+                    if (!candidates.main.includes(double)) {
+                        candidates.main.unshift(double); // 先頭に追加
+                    }
+                });
+                
                 // 中層全体
                 candidates.sub = lastRound.numbers
                     .filter(n => !centerNums.includes(n))
-                    .map(n => `${n}${n}`);
+                    .map(n => `${n}${n}`)
+                    .filter(d => !candidates.main.includes(d)); // 重複除去
                 
                 // 端数字
                 if (lastRound.isEdge) {
-                    candidates.edge = ['00', '99'];
+                    const edgeCandidates = ['00', '99'];
+                    candidates.edge = edgeCandidates.filter(d => 
+                        !candidates.main.includes(d) && !candidates.sub.includes(d) // 重複除去
+                    );
                 }
             }
             
-            displayCompression(recent4, isAlert, candidates);
+            displayCompression(recent4, isAlert, candidates, strongContinuous);
         }
         
-        function displayCompression(recent4, isAlert, candidates) {
+        function checkStrongAreaContinuous(recent4) {
+            // 強エリア（1-3位）で3回以上連続する数字を検出
+            const continuous = [];
+            
+            for (let pos = 0; pos < 3; pos++) {
+                const numberCount = {};
+                
+                recent4.forEach(round => {
+                    if (round.topNumbers[pos]) {
+                        const num = round.topNumbers[pos];
+                        numberCount[num] = (numberCount[num] || 0) + 1;
+                    }
+                });
+                
+                // 3回以上出現している数字
+                Object.entries(numberCount).forEach(([num, count]) => {
+                    if (count >= 3 && !continuous.includes(num)) {
+                        continuous.push(num);
+                    }
+                });
+            }
+            
+            return continuous;
+        }
+        
+        function analyzeExplosionPattern(rankings) {
+            const tripletSequences = [];
+            
+            // 各回の3個並びを抽出
+            for (let i = 0; i < rankings.length; i++) {
+                const rank = rankings[i];
+                const tripletsInRound = [];
+                
+                // 連続する3個を全抽出
+                for (let j = 0; j < rank.length - 2; j++) {
+                    const triplet = [rank[j], rank[j+1], rank[j+2]].sort().join(',');
+                    const position = j; // 0=1-3位, 1=2-4位...
+                    tripletsInRound.push({ 
+                        triplet, 
+                        position,
+                        area: position <= 2 ? 'strong' : position <= 5 ? 'mid' : 'weak'
+                    });
+                }
+                
+                tripletSequences.push({
+                    round: i + 1,
+                    triplets: tripletsInRound
+                });
+            }
+            
+            // 連続出現をチェック
+            const continuousPatterns = {};
+            
+            for (let i = 0; i < tripletSequences.length - 1; i++) {
+                const current = tripletSequences[i];
+                
+                current.triplets.forEach(t1 => {
+                    let consecutiveCount = 1;
+                    let startRound = i + 1;
+                    let area = t1.area;
+                    
+                    // 次の回以降で同じ並びを探す
+                    for (let j = i + 1; j < tripletSequences.length; j++) {
+                        const next = tripletSequences[j];
+                        const found = next.triplets.find(t2 => t2.triplet === t1.triplet);
+                        
+                        if (found && j === i + consecutiveCount) {
+                            consecutiveCount++;
+                        } else {
+                            break;
+                        }
+                    }
+                    
+                    if (consecutiveCount >= 2) {
+                        const key = `${t1.triplet}_${startRound}`;
+                        if (!continuousPatterns[key]) {
+                            continuousPatterns[key] = {
+                                triplet: t1.triplet,
+                                startRound,
+                                endRound: startRound + consecutiveCount - 1,
+                                count: consecutiveCount,
+                                area
+                            };
+                        }
+                    }
+                });
+            }
+            
+            displayExplosionAlert(continuousPatterns, rankings.length);
+        }
+        
+        function displayExplosionAlert(patterns, totalRounds) {
+            const container = document.getElementById('explosionAlert');
+            
+            if (Object.keys(patterns).length === 0) {
+                container.innerHTML = '';
+                return;
+            }
+            
+            const patternList = Object.values(patterns).sort((a, b) => b.endRound - a.endRound);
+            
+            const itemsHtml = patternList.map(p => {
+                const timeLag = p.area === 'strong' ? 4 : p.area === 'mid' ? 3 : 2;
+                const expectedRound = p.endRound + timeLag;
+                const isActive = expectedRound >= totalRounds;
+                const status = isActive ? `第${expectedRound}回頃に警戒` : '期間経過';
+                
+                const areaText = p.area === 'strong' ? '強エリア' : p.area === 'mid' ? '中エリア' : '弱エリア';
+                const areaClass = `area-${p.area}`;
+                
+                return `
+                    <div class="explosion-item">
+                        <div class="explosion-header">
+                            <div class="explosion-numbers">${p.triplet.split(',').join(' ')}</div>
+                            <div class="explosion-timing">${status}</div>
+                        </div>
+                        <div class="explosion-detail">
+                            <span class="${areaClass}">${areaText}</span> で第${p.startRound}-${p.endRound}回に${p.count}回連続出現<br>
+                            ${timeLag}回後（第${expectedRound}回）に爆発の可能性
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            container.innerHTML = `
+                <div class="explosion-alert">
+                    <div class="compression-title">3個並び爆発予測</div>
+                    ${itemsHtml}
+                </div>
+            `;
+        }
+        
+        function displayCompression(recent4, isAlert, candidates, strongContinuous) {
             const container = document.getElementById('compressionAlert');
             
             if (!isAlert) {
@@ -445,9 +640,13 @@
                 </div>
             `).join('');
             
-            const mainCandidates = candidates.main.slice(0, 3);
+            const mainCandidates = candidates.main.slice(0, 5);
             const subCandidates = candidates.sub.slice(0, 3);
             const edgeCandidates = candidates.edge;
+            
+            const strongInfo = strongContinuous.length > 0 
+                ? `<br>強エリア連続: ${strongContinuous.map(n => `${n}${n}`).join(', ')}` 
+                : '';
             
             container.innerHTML = `
                 <div class="compression-alert">
@@ -465,7 +664,7 @@
                             ${edgeCandidates.map(c => `<div class="candidate-sub">${c}</div>`).join('')}
                         </div>
                         <div class="wave-info">
-                            中層に数字が3-4回連続で圧縮されています。<br>
+                            中層に数字が3-4回連続で圧縮されています。${strongInfo}<br>
                             波のエネルギーが蓄積され、ダブル出現のタイミングに入っています。
                         </div>
                     </div>
